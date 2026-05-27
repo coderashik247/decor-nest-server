@@ -55,6 +55,9 @@ async function run() {
         await client.connect();
         const db = client.db('decor-nest');
         const usersCollection = db.collection('users');
+        const servicesCollection = db.collection('services');
+        const bookingsCollection = db.collection('bookings');
+        const paymentsCollection = db.collection('payments');
 
 
         const verifyAdmin = async (req, res, next) => {
@@ -97,6 +100,43 @@ async function run() {
                 insertedId: result.insertedId,
             });
         });
+
+
+        // bookings related apis
+        app.get('/bookings', async (req, res) => {
+
+            const email = req.query.email;
+
+            // if (email !== req.decoded_email) {
+            //     return res.status(403).send({
+            //         message: 'forbidden access'
+            //     })
+            // }
+
+            const query = {userEmail: email}
+
+            const result = await bookingsCollection
+                .find(query)
+                .sort({ createdAt: -1 })
+                .toArray();
+
+            res.send(result);
+        })
+
+        app.post('/bookings', async (req, res) => {
+            const booking = req.body;
+
+            // if (booking.userEmail !== req.decoded_email) {
+            //     return res.status(403).send({
+            //         message: 'forbidden access'
+            //     })
+            // }
+
+            booking.createdAt = new Date();
+
+            const result = await bookingsCollection.insertOne(booking);
+            res.send(result);
+        })
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
