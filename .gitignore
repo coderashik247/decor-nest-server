@@ -1,2 +1,4 @@
 node_modules
 .env
+
+decor-nest-firebase-adminsdk.json
