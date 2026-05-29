@@ -60,6 +60,7 @@ async function run() {
         const servicesCollection = db.collection('services');
         const bookingsCollection = db.collection('bookings');
         const paymentsCollection = db.collection('payments');
+        const decoratorsCollection = db.collection('decorators');
 
 
         const verifyAdmin = async (req, res, next) => {
@@ -74,6 +75,29 @@ async function run() {
         }
 
         // users related apis
+        app.get('/users', verifyFBToken, async (req, res) => {
+            const searchText = req.query.searchText;
+            const query = {};
+            if (searchText) {
+                query.$or = [
+                    { displayName: { $regex: searchText, $options: 'i' } },
+                    { email: { $regex: searchText, $options: 'i' } }
+                ]
+            }
+
+            const cursor = usersCollection.find(query).sort({ createdAt: -1 }).limit(10);
+            const result = await cursor.toArray();
+            res.send(result);
+        })
+
+        app.get('/users/:email/role', async (req, res) => {
+            const email = req.params.email;
+            const query = { email };
+            const user = await usersCollection.findOne(query);
+            res.send({ role: user?.role || 'user' });
+        })
+
+
         app.post("/users", async (req, res) => {
             const user = req.body;
 
@@ -108,7 +132,7 @@ async function run() {
         app.get('/bookings', async (req, res) => {
 
             const email = req.query.email;
-            const query = {};
+            let query = {};
 
             // if (email !== req.decoded_email) {
             //     return res.status(403).send({
@@ -244,7 +268,7 @@ async function run() {
 
                 // success
                 if (session.payment_status === 'paid') {
-                    const bookingId = session.metadata.bookingId;
+                    const bookingId = new ObjectId(session.metadata.bookingId);
                     // booking update
                     const query = {
                         _id: new ObjectId(bookingId)
@@ -279,7 +303,7 @@ async function run() {
                         success: true,
                         payment: {
                             _id: paymentResult.insertedId,
-                            ...paymentData
+                            ...paymentDoc
                         }
                     });
                 }
@@ -293,6 +317,27 @@ async function run() {
                 res.status(500).send({
                     message: 'payment failed'
                 });
+            }
+        });
+
+        // decorators
+        app.post('/decorators', async (req, res) => {
+            try {
+                const decorator = req.body;
+
+                const newDecorator = {
+                    ...decorator,
+                    status: 'pending',
+                    role: 'decorator',
+                    createdAt: new Date(),
+                };
+
+                const result = await decoratorsCollection.insertOne(newDecorator);
+
+                res.send(result);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Failed to create decorator" });
             }
         });
         // Send a ping to confirm a successful connection
