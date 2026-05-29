@@ -108,6 +108,7 @@ async function run() {
         app.get('/bookings', async (req, res) => {
 
             const email = req.query.email;
+            const query = {};
 
             // if (email !== req.decoded_email) {
             //     return res.status(403).send({
@@ -115,7 +116,9 @@ async function run() {
             //     })
             // }
 
-            const query = { userEmail: email }
+            if (email) {
+                query = { userEmail: email }
+            }
 
             const result = await bookingsCollection
                 .find(query)
@@ -141,71 +144,79 @@ async function run() {
         // })
 
         app.post('/bookings', async (req, res) => {
-
             const booking = req.body;
-
             booking.createdAt = new Date();
-
             booking.bookingStatus = 'pending';
-
             booking.paymentStatus = 'unpaid';
-
             const result = await bookingsCollection.insertOne(booking);
+            res.send(result);
+        });
+
+        app.patch('/bookings/:id', async (req, res) => {
+            const id = req.params.id;
+            const status = req.body.status;
+
+            const result = await bookingsCollection.updateOne(
+                { _id: new ObjectId(id) },
+                {
+                    $set: {
+                        bookingStatus: status
+                    }
+                }
+            );
+
+            res.send({ success: true, result });
+        });
+
+        // payments related apis
+        app.get('/payments', async (req, res) => {
+            const email = req.query.email;
+
+            // if (email !== req.decoded_email) {
+            //     return res.status(403).send({
+            //         message: 'forbidden access'
+            //     });
+            // }
+
+            const result = await paymentsCollection
+                .find({ customerEmail: email })
+                .sort({ paidAt: -1 })
+                .toArray();
 
             res.send(result);
         });
 
-        // payments related apis
-
         app.post('/create-checkout-session', async (req, res) => {
-
             try {
-
                 const paymentInfo = req.body;
-
                 const amount = parseInt(paymentInfo.amount * 100);
-
                 const session = await stripe.checkout.sessions.create({
-
                     payment_method_types: ['card'],
-
                     line_items: [
                         {
                             price_data: {
-
                                 currency: 'usd',
-
                                 product_data: {
                                     name: paymentInfo.serviceName,
                                 },
-
                                 unit_amount: amount,
                             },
-
                             quantity: 1,
                         },
                     ],
-
                     mode: 'payment',
-
                     customer_email: paymentInfo.customerEmail,
-
                     metadata: {
                         bookingId: paymentInfo.bookingId,
                         serviceName: paymentInfo.serviceName,
                     },
-
                     success_url: `${process.env.CLIENT_URL}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-
                     cancel_url: `${process.env.CLIENT_URL}/dashboard/my-bookings`,
                 });
-
                 res.send({ url: session.url });
 
             } catch (error) {
-
                 console.log(error);
-
                 res.status(500).send({
                     message: 'Stripe session failed'
                 });
@@ -213,7 +224,6 @@ async function run() {
         });
 
         app.patch('/payment-success', async (req, res) => {
-
             try {
                 const sessionId = req.query.session_id;
                 const session =
@@ -234,42 +244,31 @@ async function run() {
 
                 // success
                 if (session.payment_status === 'paid') {
-
                     const bookingId = session.metadata.bookingId;
-
                     // booking update
                     const query = {
                         _id: new ObjectId(bookingId)
                     };
-
                     const updateDoc = {
                         $set: {
                             paymentStatus: 'paid',
                             bookingStatus: 'confirmed',
                         }
                     };
-
                     const updatedBooking =
                         await bookingsCollection.updateOne(
                             query,
                             updateDoc
                         );
-
                     // payment save
                     const paymentDoc = {
-
                         bookingId,
-
                         transactionId,
-
+                        serviceName: session.metadata.serviceName,
                         amount: session.amount_total / 100,
-
                         currency: session.currency,
-
                         customerEmail: session.customer_email,
-
                         paymentStatus: session.payment_status,
-
                         paidAt: new Date(),
                     };
 
@@ -290,9 +289,7 @@ async function run() {
                 });
 
             } catch (error) {
-
                 console.log(error);
-
                 res.status(500).send({
                     message: 'payment failed'
                 });
