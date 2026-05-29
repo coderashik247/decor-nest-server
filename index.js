@@ -1,11 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-var admin = require("firebase-admin");
 
 dotenv.config();
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+var admin = require("firebase-admin");
+
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = process.env.MONGO_URL;
 
 
@@ -113,7 +115,7 @@ async function run() {
             //     })
             // }
 
-            const query = {userEmail: email}
+            const query = { userEmail: email }
 
             const result = await bookingsCollection
                 .find(query)
@@ -123,20 +125,179 @@ async function run() {
             res.send(result);
         })
 
-        app.post('/bookings', async (req, res) => {
-            const booking = req.body;
+        // app.post('/bookings', async (req, res) => {
+        //     const booking = req.body;
 
-            // if (booking.userEmail !== req.decoded_email) {
-            //     return res.status(403).send({
-            //         message: 'forbidden access'
-            //     })
-            // }
+        //     // if (booking.userEmail !== req.decoded_email) {
+        //     //     return res.status(403).send({
+        //     //         message: 'forbidden access'
+        //     //     })
+        //     // }
+
+        //     booking.createdAt = new Date();
+
+        //     const result = await bookingsCollection.insertOne(booking);
+        //     res.send(result);
+        // })
+
+        app.post('/bookings', async (req, res) => {
+
+            const booking = req.body;
 
             booking.createdAt = new Date();
 
+            booking.bookingStatus = 'pending';
+
+            booking.paymentStatus = 'unpaid';
+
             const result = await bookingsCollection.insertOne(booking);
+
             res.send(result);
-        })
+        });
+
+        // payments related apis
+
+        app.post('/create-checkout-session', async (req, res) => {
+
+            try {
+
+                const paymentInfo = req.body;
+
+                const amount = parseInt(paymentInfo.amount * 100);
+
+                const session = await stripe.checkout.sessions.create({
+
+                    payment_method_types: ['card'],
+
+                    line_items: [
+                        {
+                            price_data: {
+
+                                currency: 'usd',
+
+                                product_data: {
+                                    name: paymentInfo.serviceName,
+                                },
+
+                                unit_amount: amount,
+                            },
+
+                            quantity: 1,
+                        },
+                    ],
+
+                    mode: 'payment',
+
+                    customer_email: paymentInfo.customerEmail,
+
+                    metadata: {
+                        bookingId: paymentInfo.bookingId,
+                        serviceName: paymentInfo.serviceName,
+                    },
+
+                    success_url: `${process.env.CLIENT_URL}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+
+                    cancel_url: `${process.env.CLIENT_URL}/dashboard/my-bookings`,
+                });
+
+                res.send({ url: session.url });
+
+            } catch (error) {
+
+                console.log(error);
+
+                res.status(500).send({
+                    message: 'Stripe session failed'
+                });
+            }
+        });
+
+        app.patch('/payment-success', async (req, res) => {
+
+            try {
+                const sessionId = req.query.session_id;
+                const session =
+                    await stripe.checkout.sessions.retrieve(sessionId);
+                const transactionId = session.payment_intent;
+                // duplicate payment check
+                const paymentExist = await paymentsCollection.findOne({
+                    transactionId
+                });
+
+                if (paymentExist) {
+                    return res.send({
+                        success: true,
+                        message: 'already paid',
+                        payment: paymentExist
+                    });
+                }
+
+                // success
+                if (session.payment_status === 'paid') {
+
+                    const bookingId = session.metadata.bookingId;
+
+                    // booking update
+                    const query = {
+                        _id: new ObjectId(bookingId)
+                    };
+
+                    const updateDoc = {
+                        $set: {
+                            paymentStatus: 'paid',
+                            bookingStatus: 'confirmed',
+                        }
+                    };
+
+                    const updatedBooking =
+                        await bookingsCollection.updateOne(
+                            query,
+                            updateDoc
+                        );
+
+                    // payment save
+                    const paymentDoc = {
+
+                        bookingId,
+
+                        transactionId,
+
+                        amount: session.amount_total / 100,
+
+                        currency: session.currency,
+
+                        customerEmail: session.customer_email,
+
+                        paymentStatus: session.payment_status,
+
+                        paidAt: new Date(),
+                    };
+
+                    const paymentResult =
+                        await paymentsCollection.insertOne(paymentDoc);
+
+                    res.send({
+                        success: true,
+                        payment: {
+                            _id: paymentResult.insertedId,
+                            ...paymentData
+                        }
+                    });
+                }
+
+                res.send({
+                    success: false
+                });
+
+            } catch (error) {
+
+                console.log(error);
+
+                res.status(500).send({
+                    message: 'payment failed'
+                });
+            }
+        });
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
