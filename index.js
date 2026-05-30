@@ -23,7 +23,6 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// ================= AUTH =================
 const verifyFBToken = async (req, res, next) => {
     const token = req.headers.authorization;
 
@@ -41,7 +40,6 @@ const verifyFBToken = async (req, res, next) => {
     }
 };
 
-// ================= DB =================
 const client = new MongoClient(uri, {
     serverApi: {
         version: ServerApiVersion.v1,
@@ -61,7 +59,30 @@ async function run() {
         const paymentsCollection = db.collection("payments");
         const decoratorsCollection = db.collection("decorators");
 
-        // ================= USERS =================
+        const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded_email;
+
+            const user = await usersCollection.findOne({ email });
+
+            if (!user || user.role !== "admin") {
+                return res.status(403).send({ message: "Forbidden access (admin only)" });
+            }
+
+            next();
+        };
+
+        const verifyDecorator = async (req, res, next) => {
+            const email = req.decoded_email;
+
+            const user = await usersCollection.findOne({ email });
+
+            if (!user || user.role !== "decorator") {
+                return res.status(403).send({ message: "Forbidden access (decorator only)" });
+            }
+
+            next();
+        };
+
         app.post("/users", async (req, res) => {
             const user = req.body;
 
@@ -79,7 +100,7 @@ async function run() {
             res.send({ success: true, insertedId: result.insertedId });
         });
 
-        app.get("/users", async (req, res) => {
+        app.get("/users",verifyFBToken, verifyAdmin, async (req, res) => {
             const search = req.query.searchText;
 
             const query = search
@@ -95,7 +116,7 @@ async function run() {
             res.send(result);
         });
 
-        app.get("/users/:email/role", async (req, res) => {
+        app.get("/users/:email/role",verifyFBToken, async (req, res) => {
             console.log("ROLE ROUTE HIT");
             console.log(req.params.email);
 
@@ -110,8 +131,8 @@ async function run() {
             res.send({ role: user.role || "user" });
         });
 
-        // ================= BOOKINGS =================
-        app.get("/bookings", async (req, res) => {
+
+        app.get("/bookings",verifyFBToken, verifyAdmin, async (req, res) => {
             const { email, bookingStatus } = req.query;
 
             const query = {};
@@ -140,7 +161,7 @@ async function run() {
         });
 
 
-        app.get("/projects/assigned", async (req, res) => {
+        app.get("/projects/assigned", verifyAdmin, verifyDecorator, async (req, res) => {
             const { decoratorEmail, search } = req.query;
 
             const query = {
@@ -159,9 +180,7 @@ async function run() {
             res.send(result);
         });
 
-
-        // ================= ASSIGN DECORATOR (MAIN FIXED) =================
-        app.patch("/bookings/:id/assign-decorator", async (req, res) => {
+        app.patch("/bookings/:id/assign-decorator",verifyFBToken,verifyAdmin, async (req, res) => {
             try {
                 const { id } = req.params;
                 const { decoratorId, decoratorName, decoratorEmail } = req.body;
@@ -208,8 +227,7 @@ async function run() {
             }
         });
 
-        // ================= COMPLETE BOOKING =================
-        app.patch("/bookings/:id/complete", async (req, res) => {
+        app.patch("/bookings/:id/complete",verifyAdmin, verifyDecorator, async (req, res) => {
             try {
                 const { id } = req.params;
                 const { decoratorId } = req.body;
@@ -241,7 +259,7 @@ async function run() {
             }
         });
 
-        app.get("/projects/completed", async (req, res) => {
+        app.get("/projects/completed", verifyAdmin, verifyDecorator, async (req, res) => {
             try {
                 const { decoratorEmail } = req.query;
 
@@ -270,7 +288,7 @@ async function run() {
             }
         });
 
-        app.patch("/bookings/:id/project-status", async (req, res) => {
+        app.patch("/bookings/:id/project-status", verifyAdmin, verifyDecorator, async (req, res) => {
             try {
                 const { id } = req.params;
                 const { projectStatus } = req.body;
@@ -357,7 +375,6 @@ async function run() {
             }
         });
 
-        // ================= DECORATORS =================
         app.get('/decorators', async (req, res) => {
             const { status, workStatus, district, region } = req.query;
 
@@ -388,8 +405,8 @@ async function run() {
             res.send(result);
         });
 
-        // APPROVE / REJECT DECORATOR
-        app.patch("/decorators/:id", async (req, res) => {
+
+        app.patch("/decorators/:id",verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const { id } = req.params;
                 const { status, email } = req.body;
@@ -417,7 +434,7 @@ async function run() {
             }
         });
 
-        app.delete("/decorators/:id", async (req, res) => {
+        app.delete("/decorators/:id",verifyFBToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
 
             const result = await decoratorsCollection.deleteOne({
@@ -427,8 +444,7 @@ async function run() {
             res.send(result);
         });
 
-        // ================= PAYMENTS =================
-        app.get("/payments", async (req, res) => {
+        app.get("/payments",verifyFBToken, async (req, res) => {
             const { email } = req.query;
 
             const query = email ? { customerEmail: email } : {};
@@ -475,7 +491,7 @@ async function run() {
             }
         });
 
-        app.patch("/payment-success", async (req, res) => {
+        app.patch("/payment-success",verifyFBToken, async (req, res) => {
             try {
                 const sessionId = req.query.session_id;
 
@@ -522,7 +538,7 @@ async function run() {
             }
         });
 
-        app.get("/dashboard/admin/overview", async (req, res) => {
+        app.get("/dashboard/admin/overview",verifyFBToken,verifyAdmin, async (req, res) => {
             try {
                 const usersCount = await usersCollection.countDocuments();
 
@@ -575,7 +591,7 @@ async function run() {
             }
         });
 
-        app.get("/dashboard/decorator/overview", async (req, res) => {
+        app.get("/dashboard/decorator/overview",verifyAdmin, verifyDecorator, async (req, res) => {
             try {
                 const { email } = req.query;
 
@@ -638,7 +654,7 @@ async function run() {
             }
         });
 
-        app.get("/dashboard/user/overview", async (req, res) => {
+        app.get("/dashboard/user/overview",verifyFBToken, async (req, res) => {
             try {
                 const { email } = req.query;
 
@@ -689,7 +705,6 @@ async function run() {
             }
         });
 
-        // ================= HEALTH CHECK =================
         app.get("/", (req, res) => {
             res.send("Decor Nest API Running 🚀");
         });
