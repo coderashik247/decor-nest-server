@@ -241,6 +241,35 @@ async function run() {
             }
         });
 
+        app.get("/projects/completed", async (req, res) => {
+            try {
+                const { decoratorEmail } = req.query;
+
+                const query = {
+                    bookingStatus: "completed",
+                };
+
+                if (decoratorEmail) {
+                    query.decoratorEmail = decoratorEmail;
+                }
+
+                const result = await bookingsCollection
+                    .find(query)
+                    .sort({ updatedAt: -1 })
+                    .toArray();
+
+                res.send(result);
+
+            } catch (error) {
+                console.error(error);
+
+                res.status(500).send({
+                    success: false,
+                    message: "Failed to fetch completed projects",
+                });
+            }
+        });
+
         app.patch("/bookings/:id/project-status", async (req, res) => {
             try {
                 const { id } = req.params;
