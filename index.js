@@ -132,11 +132,33 @@ async function run() {
             booking.createdAt = new Date();
             booking.bookingStatus = "pending";
             booking.paymentStatus = "unpaid";
+            booking.projectStatus = "pending";
 
             const result = await bookingsCollection.insertOne(booking);
 
             res.send(result);
         });
+
+
+        app.get("/projects/assigned", async (req, res) => {
+            const { decoratorEmail, search } = req.query;
+
+            const query = {
+                bookingStatus: "decorator_assigned",
+            };
+
+            if (decoratorEmail) {
+                query.decoratorEmail = decoratorEmail;
+            }
+
+            if (search) {
+                query.serviceName = { $regex: search, $options: "i" };
+            }
+
+            const result = await bookingsCollection.find(query).toArray();
+            res.send(result);
+        });
+
 
         // ================= ASSIGN DECORATOR (MAIN FIXED) =================
         app.patch("/bookings/:id/assign-decorator", async (req, res) => {
@@ -216,6 +238,93 @@ async function run() {
 
             } catch (error) {
                 res.status(500).send({ success: false });
+            }
+        });
+
+        app.patch("/bookings/:id/project-status", async (req, res) => {
+            try {
+                const { id } = req.params;
+                const { projectStatus } = req.body;
+
+                const allowedStatuses = [
+                    "planning",
+                    "materials_prepared",
+                    "on_the_way",
+                    "setup_in_progress",
+                    "completed",
+                    "rejected",
+                ];
+
+                if (!allowedStatuses.includes(projectStatus)) {
+                    return res.status(400).send({
+                        success: false,
+                        message: "Invalid project status",
+                    });
+                }
+
+                const booking = await bookingsCollection.findOne({
+                    _id: new ObjectId(id),
+                });
+
+                if (!booking) {
+                    return res.status(404).send({
+                        success: false,
+                        message: "Booking not found",
+                    });
+                }
+
+                const updateDoc = {
+                    projectStatus,
+                    updatedAt: new Date(),
+                };
+
+                // Complete হলে booking complete
+                if (projectStatus === "completed") {
+                    updateDoc.bookingStatus = "completed";
+                }
+
+                // Reject হলে booking reject
+                if (projectStatus === "rejected") {
+                    updateDoc.bookingStatus = "rejected";
+                }
+
+                const result = await bookingsCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    {
+                        $set: updateDoc,
+                    }
+                );
+
+                // Complete বা Reject হলে decorator free
+                if (
+                    (projectStatus === "completed" ||
+                        projectStatus === "rejected") &&
+                    booking.decoratorId
+                ) {
+                    await decoratorsCollection.updateOne(
+                        {
+                            _id: new ObjectId(booking.decoratorId),
+                        },
+                        {
+                            $set: {
+                                workStatus: "available",
+                            },
+                        }
+                    );
+                }
+
+                res.send({
+                    success: true,
+                    modifiedCount: result.modifiedCount,
+                });
+
+            } catch (error) {
+                console.error("Project Status Update Error:", error);
+
+                res.status(500).send({
+                    success: false,
+                    message: "Server Error",
+                });
             }
         });
 
