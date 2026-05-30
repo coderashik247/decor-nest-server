@@ -522,6 +522,173 @@ async function run() {
             }
         });
 
+        app.get("/dashboard/admin/overview", async (req, res) => {
+            try {
+                const usersCount = await usersCollection.countDocuments();
+
+                const decoratorsCount = await decoratorsCollection.countDocuments();
+
+                const pendingDecorators = await decoratorsCollection.countDocuments({
+                    status: "pending",
+                });
+
+                const totalBookings = await bookingsCollection.countDocuments();
+
+                const completedProjects = await bookingsCollection.countDocuments({
+                    bookingStatus: "completed",
+                });
+
+                const revenueAgg = await bookingsCollection.aggregate([
+                    {
+                        $match: {
+                            bookingStatus: "completed",
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalRevenue: {
+                                $sum: "$servicePrice",
+                            },
+                        },
+                    },
+                ]).toArray();
+
+                const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
+
+                const activeProjects = await bookingsCollection.countDocuments({
+                    bookingStatus: "decorator_assigned",
+                });
+
+                res.send({
+                    usersCount,
+                    decoratorsCount,
+                    pendingDecorators,
+                    totalBookings,
+                    completedProjects,
+                    totalRevenue,
+                    activeProjects,
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ success: false });
+            }
+        });
+
+        app.get("/dashboard/decorator/overview", async (req, res) => {
+            try {
+                const { email } = req.query;
+
+                const match = {
+                    decoratorEmail: email,
+                };
+
+                const assigned = await bookingsCollection.countDocuments({
+                    ...match,
+                    bookingStatus: "decorator_assigned",
+                });
+
+                const completed = await bookingsCollection.countDocuments({
+                    ...match,
+                    bookingStatus: "completed",
+                });
+
+                const active = await bookingsCollection.countDocuments({
+                    ...match,
+                    projectStatus: {
+                        $in: [
+                            "planning",
+                            "materials_prepared",
+                            "on_the_way",
+                            "setup_in_progress",
+                        ],
+                    },
+                });
+
+                const earningsAgg = await bookingsCollection.aggregate([
+                    {
+                        $match: {
+                            decoratorEmail: email,
+                            bookingStatus: "completed",
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalEarnings: {
+                                $sum: {
+                                    $multiply: ["$servicePrice", 0.6],
+                                },
+                            },
+                        },
+                    },
+                ]).toArray();
+
+                const totalEarnings = earningsAgg[0]?.totalEarnings || 0;
+
+                res.send({
+                    assigned,
+                    completed,
+                    active,
+                    totalEarnings,
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ success: false });
+            }
+        });
+
+        app.get("/dashboard/user/overview", async (req, res) => {
+            try {
+                const { email } = req.query;
+
+                const match = {
+                    userEmail: email,
+                };
+
+                const totalBookings = await bookingsCollection.countDocuments(match);
+
+                const pending = await bookingsCollection.countDocuments({
+                    ...match,
+                    bookingStatus: "pending",
+                });
+
+                const completed = await bookingsCollection.countDocuments({
+                    ...match,
+                    bookingStatus: "completed",
+                });
+
+                const totalSpentAgg = await bookingsCollection.aggregate([
+                    {
+                        $match: {
+                            userEmail: email,
+                            paymentStatus: "paid",
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalSpent: {
+                                $sum: "$servicePrice",
+                            },
+                        },
+                    },
+                ]).toArray();
+
+                const totalSpent = totalSpentAgg[0]?.totalSpent || 0;
+
+                res.send({
+                    totalBookings,
+                    pending,
+                    completed,
+                    totalSpent,
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ success: false });
+            }
+        });
+
         // ================= HEALTH CHECK =================
         app.get("/", (req, res) => {
             res.send("Decor Nest API Running 🚀");
